@@ -20,6 +20,11 @@ export interface ParsedData {
   dayData: DayData[];
 }
 
+export interface ShiftSelection {
+  shift: '1' | '2';
+  date?: Date;
+}
+
 export interface DayColumns {
   dayIndex: number;
   columns: string[];

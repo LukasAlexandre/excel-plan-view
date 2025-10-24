@@ -1,12 +1,10 @@
 import * as XLSX from 'xlsx';
-import { ProductRow, ParsedData, DayColumns } from '@/types/excel';
+import { ProductRow, ParsedData } from '@/types/excel';
 
-const DAY_NAMES = ['Segunda', 'Terça', 'Quarta', 'Quinta', 'Sexta'];
+// Regex to match day columns: PROG, REAL, SET-UP, RAMP
+const DAY_COLUMN_REGEX = /^(PROG|REAL|SET-UP|RAMP)$/i;
 
-// Regex to match day columns: PROG, REAL, SET-UP, RAMP with optional .N suffix
-const DAY_COLUMN_REGEX = /^(PROG|REAL|SET-UP|RAMP)(\.\d+)?$/i;
-
-export const parseExcelFile = async (file: File): Promise<ParsedData> => {
+export const parseExcelFile = async (file: File, targetDate?: Date, shift?: string): Promise<ParsedData> => {
   return new Promise((resolve, reject) => {
     const reader = new FileReader();
     
@@ -41,21 +39,50 @@ export const parseExcelFile = async (file: File): Promise<ParsedData> => {
 
         const headers = jsonData[headerRowIndex].map((h: any) => String(h).trim());
         
-        // Identify day columns
-        const dayColumnsMap = new Map<number, string[]>();
-        headers.forEach((header, index) => {
-          const match = header.match(DAY_COLUMN_REGEX);
-          if (match) {
-            const suffix = match[2] ? parseInt(match[2].substring(1)) : 0;
-            if (!dayColumnsMap.has(suffix)) {
-              dayColumnsMap.set(suffix, []);
+        // Get date row (one row above header)
+        const dateRow = headerRowIndex > 0 ? jsonData[headerRowIndex - 1] : [];
+        
+        // Find columns that match the target date
+        const targetDateColumns: number[] = [];
+        if (targetDate) {
+          dateRow.forEach((cell: any, index: number) => {
+            if (cell) {
+              let cellDate: Date | null = null;
+              
+              // Try parsing as date object
+              if (cell instanceof Date) {
+                cellDate = cell;
+              } else {
+                // Try parsing string date (format: "23-Oct")
+                const dateStr = String(cell).trim();
+                const match = dateStr.match(/(\d+)-(\w+)/);
+                if (match) {
+                  const day = parseInt(match[1]);
+                  const monthStr = match[2];
+                  const monthMap: { [key: string]: number } = {
+                    'Jan': 0, 'Feb': 1, 'Mar': 2, 'Apr': 3, 'May': 4, 'Jun': 5,
+                    'Jul': 6, 'Aug': 7, 'Sep': 8, 'Oct': 9, 'Nov': 10, 'Dec': 11
+                  };
+                  const month = monthMap[monthStr];
+                  if (month !== undefined) {
+                    const year = targetDate.getFullYear();
+                    cellDate = new Date(year, month, day);
+                  }
+                }
+              }
+              
+              // Check if dates match (same day, month, year)
+              if (cellDate) {
+                if (
+                  cellDate.getDate() === targetDate.getDate() &&
+                  cellDate.getMonth() === targetDate.getMonth()
+                ) {
+                  targetDateColumns.push(index);
+                }
+              }
             }
-            dayColumnsMap.get(suffix)!.push(header);
-          }
-        });
-
-        // Sort day indices and limit to 5 days
-        const sortedDayIndices = Array.from(dayColumnsMap.keys()).sort((a, b) => a - b).slice(0, 5);
+          });
+        }
         
         // Parse data rows
         const dataRows: ProductRow[] = [];
@@ -74,9 +101,32 @@ export const parseExcelFile = async (file: File): Promise<ParsedData> => {
           dataRows.push(rowObj as ProductRow);
         }
 
+        // Filter by shift if specified
+        let filteredRows = dataRows;
+        if (shift) {
+          filteredRows = dataRows.filter(row => {
+            const turno = String(row['TURNO'] || '').trim();
+            return turno === shift;
+          });
+        }
+
+        // If target date specified, filter by active products on that date
+        let activeProducts = filteredRows;
+        if (targetDate && targetDateColumns.length > 0) {
+          activeProducts = filteredRows.filter(row => {
+            // Check if any column for the target date has an active value
+            return targetDateColumns.some(colIndex => {
+              const header = headers[colIndex];
+              const value = String(row[header] || '').trim().toLowerCase();
+              // Active if: "x" or any non-zero number
+              return value === 'x' || (value && value !== '0' && value !== 'nan' && !isNaN(Number(value)));
+            });
+          });
+        }
+
         // Deduplicate by LINHA + PRODUTO
         const seenKeys = new Set<string>();
-        const uniqueRows = dataRows.filter(row => {
+        const uniqueRows = activeProducts.filter(row => {
           const linha = row['LINHA'] || '';
           const produto = row['PRODUTO'] || row['Produto'] || '';
           const key = `${linha}|${produto}`;
@@ -86,30 +136,10 @@ export const parseExcelFile = async (file: File): Promise<ParsedData> => {
           return true;
         });
 
-        // Filter products by day
-        const dayData = sortedDayIndices.map((dayIndex, i) => {
-          const dayColumns = dayColumnsMap.get(dayIndex) || [];
-          
-          const activeProducts = uniqueRows.filter(row => {
-            // Check if any column for this day has an active value
-            return dayColumns.some(colName => {
-              const value = String(row[colName] || '').trim().toLowerCase();
-              // Active if: not empty, not "0", or is "x"
-              return value && value !== '0' && value !== 'nan' || value === 'x';
-            });
-          });
-
-          return {
-            day: `D${i + 1}`,
-            dayName: DAY_NAMES[i] || `Dia ${i + 1}`,
-            products: activeProducts
-          };
-        });
-
         resolve({
           headers,
           allRows: uniqueRows,
-          dayData
+          dayData: []
         });
 
       } catch (error) {

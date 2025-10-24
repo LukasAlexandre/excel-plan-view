@@ -1,29 +1,42 @@
 import { useState } from 'react';
 import { FileUpload } from '@/components/FileUpload';
+import { ShiftSelector } from '@/components/ShiftSelector';
 import { DayPlanView } from '@/components/DayPlanView';
-import { WeekPlanView } from '@/components/WeekPlanView';
 import { parseExcelFile } from '@/utils/excelParser';
 import { ParsedData } from '@/types/excel';
 import { Button } from '@/components/ui/button';
-import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
-import { Calendar, CalendarDays, Upload as UploadIcon } from 'lucide-react';
+import { Upload as UploadIcon } from 'lucide-react';
 import { toast } from 'sonner';
 
 const Index = () => {
   const [parsedData, setParsedData] = useState<ParsedData | null>(null);
-  const [view, setView] = useState<'upload' | 'menu' | 'day' | 'week'>('upload');
+  const [uploadedFile, setUploadedFile] = useState<File | null>(null);
+  const [view, setView] = useState<'upload' | 'shift' | 'plan'>('upload');
   const [isLoading, setIsLoading] = useState(false);
+  const [selectedShift, setSelectedShift] = useState<'1' | '2' | null>(null);
 
   const handleFileSelect = async (file: File) => {
+    setUploadedFile(file);
+    setView('shift');
+  };
+
+  const handleShiftSelect = async (shift: '1' | '2') => {
+    if (!uploadedFile) return;
+    
     setIsLoading(true);
+    setSelectedShift(shift);
+    
     try {
-      const data = await parseExcelFile(file);
+      // Use today's date for filtering
+      const today = new Date();
+      const data = await parseExcelFile(uploadedFile, today, shift);
       setParsedData(data);
-      setView('menu');
-      toast.success('Planilha carregada com sucesso!');
+      setView('plan');
+      toast.success(`Plano carregado - ${shift}° Turno`);
     } catch (error) {
       console.error('Error parsing file:', error);
       toast.error('Erro ao processar arquivo. Verifique o formato da planilha.');
+      setView('upload');
     } finally {
       setIsLoading(false);
     }
@@ -31,10 +44,12 @@ const Index = () => {
 
   const handleReset = () => {
     setParsedData(null);
+    setUploadedFile(null);
+    setSelectedShift(null);
     setView('upload');
   };
 
-  if (view === 'upload' || !parsedData) {
+  if (view === 'upload') {
     return (
       <div className="min-h-screen bg-background p-8">
         <div className="max-w-4xl mx-auto">
@@ -53,92 +68,46 @@ const Index = () => {
     );
   }
 
-  if (view === 'menu') {
+  if (view === 'shift' && uploadedFile) {
+    return (
+      <ShiftSelector 
+        onSelectShift={handleShiftSelect}
+        selectedFile={uploadedFile.name}
+      />
+    );
+  }
+
+  if (view === 'plan' && parsedData) {
+    const today = new Date();
+    const dateStr = today.toLocaleDateString('pt-BR', { 
+      day: '2-digit', 
+      month: '2-digit',
+      year: 'numeric'
+    });
+    
+    const dayData = {
+      day: dateStr,
+      dayName: `${dateStr} - ${selectedShift}° Turno`,
+      products: parsedData.allRows
+    };
+
     return (
       <div className="min-h-screen bg-background p-8">
-        <div className="max-w-6xl mx-auto">
-          <div className="flex items-center justify-between mb-12">
-            <div>
-              <h1 className="text-4xl font-bold text-foreground mb-2">
-                Plano Carregado
-              </h1>
-              <p className="text-muted-foreground">
-                Selecione uma visualização
-              </p>
-            </div>
-            <Button onClick={handleReset} variant="outline">
+        <div className="max-w-7xl mx-auto">
+          <div className="mb-8">
+            <Button onClick={handleReset} variant="ghost" className="mb-4">
               <UploadIcon className="w-4 h-4 mr-2" />
               Nova Planilha
             </Button>
           </div>
 
-          <div className="grid md:grid-cols-2 gap-6">
-            <Card 
-              className="cursor-pointer hover:shadow-lg transition-all hover:border-primary/50 bg-card"
-              onClick={() => setView('day')}
-            >
-              <CardHeader>
-                <Calendar className="w-12 h-12 text-primary mb-4" />
-                <CardTitle className="text-2xl">Plano do Dia</CardTitle>
-                <CardDescription>
-                  Visualize os produtos ativos para hoje (Segunda-feira)
-                </CardDescription>
-              </CardHeader>
-              <CardContent>
-                <div className="text-4xl font-bold text-primary">
-                  {parsedData.dayData[0]?.products.length || 0}
-                </div>
-                <p className="text-sm text-muted-foreground mt-1">
-                  produtos ativos
-                </p>
-              </CardContent>
-            </Card>
-
-            <Card 
-              className="cursor-pointer hover:shadow-lg transition-all hover:border-primary/50 bg-card"
-              onClick={() => setView('week')}
-            >
-              <CardHeader>
-                <CalendarDays className="w-12 h-12 text-primary mb-4" />
-                <CardTitle className="text-2xl">Plano da Semana</CardTitle>
-                <CardDescription>
-                  Visualize o planejamento completo de Segunda a Sexta
-                </CardDescription>
-              </CardHeader>
-              <CardContent>
-                <div className="text-4xl font-bold text-primary">
-                  5
-                </div>
-                <p className="text-sm text-muted-foreground mt-1">
-                  dias de produção
-                </p>
-              </CardContent>
-            </Card>
-          </div>
+          <DayPlanView dayData={dayData} />
         </div>
       </div>
     );
   }
 
-  return (
-    <div className="min-h-screen bg-background p-8">
-      <div className="max-w-7xl mx-auto">
-        <div className="mb-8">
-          <Button onClick={() => setView('menu')} variant="ghost" className="mb-4">
-            ← Voltar ao Menu
-          </Button>
-        </div>
-
-        {view === 'day' && parsedData.dayData[0] && (
-          <DayPlanView dayData={parsedData.dayData[0]} />
-        )}
-
-        {view === 'week' && (
-          <WeekPlanView weekData={parsedData.dayData} />
-        )}
-      </div>
-    </div>
-  );
+  return null;
 };
 
 export default Index;
