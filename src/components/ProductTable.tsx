@@ -15,6 +15,29 @@ const LINE_COLORS: { [key: string]: string } = {
   'MB05': 'bg-[hsl(var(--line-orange))]/20 border-l-4 border-[hsl(var(--line-orange))]',
 };
 
+// Fallback palette for lines not explicitly mapped above
+const COLOR_VARS = [
+  '--line-blue',
+  '--line-cyan',
+  '--line-purple',
+  '--line-green',
+  '--line-yellow',
+  '--line-red',
+  '--line-orange',
+];
+
+const colorClassForLine = (linha: string) => {
+  if (LINE_COLORS[linha]) return LINE_COLORS[linha];
+  // Deterministic color by hashing the line id
+  let hash = 0;
+  for (let i = 0; i < linha.length; i++) {
+    hash = (hash * 31 + linha.charCodeAt(i)) | 0;
+  }
+  const idx = Math.abs(hash) % COLOR_VARS.length;
+  const varName = COLOR_VARS[idx];
+  return `bg-[hsl(var(${varName}))]/20 border-l-4 border-[hsl(var(${varName}))]`;
+};
+
 export const ProductTable = ({ products }: ProductTableProps) => {
   if (products.length === 0) {
     return (
@@ -39,7 +62,7 @@ export const ProductTable = ({ products }: ProductTableProps) => {
         <TableBody>
           {products.map((product, index) => {
             const linha = product.LINHA || '';
-            const colorClass = LINE_COLORS[linha] || '';
+            const colorClass = colorClassForLine(linha);
             
             return (
               <TableRow 

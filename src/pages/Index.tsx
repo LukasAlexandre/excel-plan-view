@@ -27,11 +27,12 @@ const Index = () => {
     setSelectedShift(shift);
     
     try {
-      // Use today's date for filtering
+      // Use today's date for filtering columns of the selected day
       const today = new Date();
       const data = await parseExcelFile(uploadedFile, today, shift);
       setParsedData(data);
       setView('plan');
+      
       toast.success(`Plano carregado - ${shift}° Turno`);
     } catch (error) {
       console.error('Error parsing file:', error);

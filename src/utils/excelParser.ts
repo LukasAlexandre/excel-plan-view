@@ -45,6 +45,9 @@ export const parseExcelFile = async (file: File, targetDate?: Date, shift?: stri
         // Find columns that match the target date
         const targetDateColumns: number[] = [];
         if (targetDate) {
+          console.log('🔍 Target Date:', targetDate);
+          console.log('📅 Date Row:', dateRow);
+          
           dateRow.forEach((cell: any, index: number) => {
             if (cell) {
               let cellDate: Date | null = null;
@@ -53,12 +56,30 @@ export const parseExcelFile = async (file: File, targetDate?: Date, shift?: stri
               if (cell instanceof Date) {
                 cellDate = cell;
               } else {
-                // Try parsing string date (format: "23-Oct")
+                // Try parsing string date (format: "23/out" or "23-Oct")
                 const dateStr = String(cell).trim();
-                const match = dateStr.match(/(\d+)-(\w+)/);
-                if (match) {
-                  const day = parseInt(match[1]);
-                  const monthStr = match[2];
+                
+                // Match "23/out" format
+                const matchPt = dateStr.match(/(\d+)\/(\w+)/);
+                if (matchPt) {
+                  const day = parseInt(matchPt[1]);
+                  const monthStr = matchPt[2].toLowerCase();
+                  const monthMapPt: { [key: string]: number } = {
+                    'jan': 0, 'fev': 1, 'mar': 2, 'abr': 3, 'mai': 4, 'jun': 5,
+                    'jul': 6, 'ago': 7, 'set': 8, 'out': 9, 'nov': 10, 'dez': 11
+                  };
+                  const month = monthMapPt[monthStr];
+                  if (month !== undefined) {
+                    const year = targetDate.getFullYear();
+                    cellDate = new Date(year, month, day);
+                  }
+                }
+                
+                // Match "23-Oct" format
+                const matchEn = dateStr.match(/(\d+)-(\w+)/);
+                if (matchEn && !cellDate) {
+                  const day = parseInt(matchEn[1]);
+                  const monthStr = matchEn[2];
                   const monthMap: { [key: string]: number } = {
                     'Jan': 0, 'Feb': 1, 'Mar': 2, 'Apr': 3, 'May': 4, 'Jun': 5,
                     'Jul': 6, 'Aug': 7, 'Sep': 8, 'Oct': 9, 'Nov': 10, 'Dec': 11
@@ -77,11 +98,14 @@ export const parseExcelFile = async (file: File, targetDate?: Date, shift?: stri
                   cellDate.getDate() === targetDate.getDate() &&
                   cellDate.getMonth() === targetDate.getMonth()
                 ) {
+                  console.log(`✅ Found matching date column at index ${index}: ${headers[index]}`);
                   targetDateColumns.push(index);
                 }
               }
             }
           });
+          
+          console.log('📊 Target Date Columns:', targetDateColumns.map(idx => `${idx}: ${headers[idx]}`));
         }
         
         // Parse data rows
@@ -94,6 +118,10 @@ export const parseExcelFile = async (file: File, targetDate?: Date, shift?: stri
             rowObj[header] = row[colIndex] !== undefined ? String(row[colIndex]).trim() : '';
           });
 
+          // Keep a reference to the raw cells so we can access columns by index
+          // This avoids collisions when headers repeat (e.g., multiple REAL/PROG per dia)
+          rowObj.__cells = row;
+
           // Skip if PRODUTO is empty
           const produto = rowObj['PRODUTO'] || rowObj['Produto'] || '';
           if (!produto) continue;
@@ -104,37 +132,91 @@ export const parseExcelFile = async (file: File, targetDate?: Date, shift?: stri
         // Filter by shift if specified
         let filteredRows = dataRows;
         if (shift) {
+          console.log(`🔄 Filtering by shift: ${shift}`);
+          console.log(`📊 Total rows before shift filter: ${dataRows.length}`);
+          
           filteredRows = dataRows.filter(row => {
             const turno = String(row['TURNO'] || '').trim();
+            const linha = row['LINHA'] || '';
+            const produto = row['PRODUTO'] || '';
+            
+            // Log first few rows to debug
+            if (dataRows.indexOf(row) < 10) {
+              console.log(`Row ${dataRows.indexOf(row)}: LINHA=${linha}, TURNO="${turno}", Match=${turno === shift}`);
+            }
+            
             return turno === shift;
           });
+          
+          console.log(`📊 Total rows after shift filter: ${filteredRows.length}`);
         }
 
         // If target date specified, filter by active products on that date
         let activeProducts = filteredRows;
         if (targetDate && targetDateColumns.length > 0) {
+          console.log(`🔎 Filtering ${filteredRows.length} rows by target date columns...`);
+
           activeProducts = filteredRows.filter(row => {
-            // Check if any column for the target date has an active value
-            return targetDateColumns.some(colIndex => {
+            const linha = row['LINHA'] || '';
+            const produto = row['PRODUTO'] || '';
+            const turno = row['TURNO'] || '';
+
+            // Check if any of the matched columns for the target date has a meaningful value
+            const hasValue = targetDateColumns.some(colIndex => {
               const header = headers[colIndex];
-              const value = String(row[header] || '').trim().toLowerCase();
-              // Active if: "x" or any non-zero number
-              return value === 'x' || (value && value !== '0' && value !== 'nan' && !isNaN(Number(value)));
+              const rawCells = (row as any).__cells as any[] | undefined;
+              const cellValue = rawCells ? rawCells[colIndex] : undefined;
+              const value = String(cellValue ?? '').trim();
+
+              // Debug first few rows
+              if (filteredRows.indexOf(row) < 5) {
+                console.log(`  📋 Row ${filteredRows.indexOf(row)}: LINHA=${linha}, Header="${header}"[${colIndex}], Value="${value}"`);
+              }
+
+              if (value === '' || value === 'undefined' || value === 'null') {
+                return false;
+              }
+
+              // Numeric values must be > 0
+              const numValue = Number(value.toString().replace(/\./g, '').replace(',', '.'));
+              if (!isNaN(numValue)) {
+                return numValue > 0;
+              }
+
+              // Non-numeric markers (like 'x'/'X') indicate activity
+              return value.toLowerCase() === 'x';
             });
+
+            if (hasValue) {
+              console.log(`✅ Active: ${linha} - ${produto} (Turno ${turno})`);
+            }
+
+            return hasValue;
           });
+
+          console.log(`✅ Found ${activeProducts.length} active products for target date`);
+        } else if (targetDate && targetDateColumns.length === 0) {
+          console.warn('⚠️ No columns found for target date!');
         }
 
-        // Deduplicate by LINHA + PRODUTO
-        const seenKeys = new Set<string>();
+        // Deduplicate by LINHA only (show only the first product for each line)
+        const seenLines = new Set<string>();
         const uniqueRows = activeProducts.filter(row => {
           const linha = row['LINHA'] || '';
-          const produto = row['PRODUTO'] || row['Produto'] || '';
-          const key = `${linha}|${produto}`;
           
-          if (seenKeys.has(key)) return false;
-          seenKeys.add(key);
+          if (!linha) return false; // Skip rows without LINHA
+          
+          if (seenLines.has(linha)) {
+            console.log(`❌ Skipping duplicate LINHA: ${linha}`);
+            return false;
+          }
+          
+          seenLines.add(linha);
+          console.log(`✅ Keeping LINHA: ${linha} - ${row['PRODUTO']}`);
           return true;
         });
+        
+        console.log(`🎯 Final unique rows: ${uniqueRows.length} (deduplicated by LINHA)`);
 
         resolve({
           headers,
