@@ -1,5 +1,5 @@
 import * as XLSX from 'xlsx';
-import { ProductRow, ParsedData } from '@/types/excel';
+import { ProductRow, ParsedData, PlanStats } from '@/types/excel';
 
 // Regex to match day columns: PROG, REAL, SET-UP, RAMP
 const DAY_COLUMN_REGEX = /^(PROG|REAL|SET-UP|RAMP)$/i;
@@ -151,7 +151,7 @@ export const parseExcelFile = async (file: File, targetDate?: Date, shift?: stri
           console.log(`📊 Total rows after shift filter: ${filteredRows.length}`);
         }
 
-        // If target date specified, filter by active products on that date
+  // If target date specified, filter by active products on that date
         let activeProducts = filteredRows;
         if (targetDate && targetDateColumns.length > 0) {
           console.log(`🔎 Filtering ${filteredRows.length} rows by target date columns...`);
@@ -166,25 +166,20 @@ export const parseExcelFile = async (file: File, targetDate?: Date, shift?: stri
               const header = headers[colIndex];
               const rawCells = (row as any).__cells as any[] | undefined;
               const cellValue = rawCells ? rawCells[colIndex] : undefined;
-              const value = String(cellValue ?? '').trim();
+              const valueStr = String(cellValue ?? '').trim();
 
-              // Debug first few rows
-              if (filteredRows.indexOf(row) < 5) {
-                console.log(`  📋 Row ${filteredRows.indexOf(row)}: LINHA=${linha}, Header="${header}"[${colIndex}], Value="${value}"`);
-              }
+              // Only consider columns whose header is exactly PROG for the selected date
+              if (String(header).toUpperCase() !== 'PROG') return false;
 
-              if (value === '' || value === 'undefined' || value === 'null') {
+              if (valueStr === '' || valueStr === 'undefined' || valueStr === 'null') {
                 return false;
               }
 
-              // Numeric values must be > 0
-              const numValue = Number(value.toString().replace(/\./g, '').replace(',', '.'));
-              if (!isNaN(numValue)) {
-                return numValue > 0;
-              }
-
-              // Non-numeric markers (like 'x'/'X') indicate activity
-              return value.toLowerCase() === 'x';
+              // Parse integer strictly for PROG
+              const digits = valueStr.match(/\d+/g);
+              if (!digits) return false;
+              const n = Number(digits.join(''));
+              return !isNaN(n) && n > 0;
             });
 
             if (hasValue) {
@@ -199,29 +194,99 @@ export const parseExcelFile = async (file: File, targetDate?: Date, shift?: stri
           console.warn('⚠️ No columns found for target date!');
         }
 
-        // Deduplicate by LINHA only (show only the first product for each line)
-        const seenLines = new Set<string>();
+        // Show ALL active rows (no dedup), because multiple SKUs can run in the same line/day
         const uniqueRows = activeProducts.filter(row => {
+          const produto = row['PRODUTO'] || '';
           const linha = row['LINHA'] || '';
-          
-          if (!linha) return false; // Skip rows without LINHA
-          
-          if (seenLines.has(linha)) {
-            console.log(`❌ Skipping duplicate LINHA: ${linha}`);
-            return false;
-          }
-          
-          seenLines.add(linha);
-          console.log(`✅ Keeping LINHA: ${linha} - ${row['PRODUTO']}`);
-          return true;
+          return Boolean(produto) && Boolean(linha);
         });
-        
-        console.log(`🎯 Final unique rows: ${uniqueRows.length} (deduplicated by LINHA)`);
+        console.log(`🎯 Final rows: ${uniqueRows.length} (all active SKUs for the day/turno)`);
+
+        // ===== Aggregate stats: OP list, total HCs, and total program for the target day =====
+          // ===== Helpers for aggregates =====
+          // Integer parser for counts like PROG and HCs (strip all non-digits)
+          const toInt = (val: any): number => {
+            if (val === undefined || val === null) return 0;
+            if (typeof val === 'number') return Math.round(val);
+            const digits = String(val).match(/\d+/g);
+            if (!digits) return 0;
+            const joined = digits.join('');
+            const n = Number(joined);
+            return isNaN(n) ? 0 : n;
+          };
+
+          // Try to detect OP and HC columns by header names
+          const findHeaderIndex = (predicate: (h: string) => boolean): number => {
+            return headers.findIndex(h => predicate(String(h).toUpperCase().trim()));
+          };
+
+          const opColIdx = findHeaderIndex(h => h === 'OP' || h.includes('ORDEM'));
+          const hcColIdx = findHeaderIndex(h => h === 'HC' || h === 'HCS' || h === 'HCs'.toUpperCase());
+
+          const opSet = new Set<string>();
+          let totalHCs = 0;
+          uniqueRows.forEach(row => {
+            const cells = (row as any).__cells as any[] | undefined;
+            if (opColIdx >= 0) {
+              const opRaw = cells ? cells[opColIdx] : row['OP'];
+              const op = String(opRaw ?? '').trim();
+              if (op) opSet.add(op);
+            }
+            if (hcColIdx >= 0) {
+              const hcRaw = cells ? cells[hcColIdx] : row['HC'] || row['HCS'] || (row as any)['HCs'];
+              totalHCs += toInt(hcRaw);
+            }
+          });
+
+          // Sum PROG only for the target date columns whose header is exactly PROG
+          let totalProg = 0;
+          if (targetDateColumns.length > 0) {
+            uniqueRows.forEach(row => {
+              const cells = (row as any).__cells as any[] | undefined;
+              if (!cells) return;
+              targetDateColumns.forEach(colIdx => {
+                const header = headers[colIdx];
+                if (DAY_COLUMN_REGEX.test(String(header)) && String(header).toUpperCase() === 'PROG') {
+                  totalProg += toInt(cells[colIdx]);
+                }
+              });
+            });
+          }
+
+          // Also embed per-row values for OP, HCs and PROG_DIA so the UI can show columns
+          uniqueRows.forEach(row => {
+            const cells = (row as any).__cells as any[] | undefined;
+            if (opColIdx >= 0) {
+              const opRaw = cells ? cells[opColIdx] : row['OP'] || row['ORDEM'] || row['Ordem'];
+              (row as any).OP = String(opRaw ?? '').trim();
+            }
+            if (hcColIdx >= 0) {
+              const hcRaw = cells ? cells[hcColIdx] : row['HC'] || row['HCS'] || (row as any)['HCs'];
+              (row as any).HCs = toInt(hcRaw);
+            }
+            if (targetDateColumns.length > 0 && cells) {
+              let rowProg = 0;
+              targetDateColumns.forEach(colIdx => {
+                const header = headers[colIdx];
+                if (String(header).toUpperCase() === 'PROG') {
+                  rowProg += toInt(cells[colIdx]);
+                }
+              });
+              (row as any).PROG_DIA = rowProg;
+            }
+          });
+
+          const stats: PlanStats = {
+            opList: Array.from(opSet),
+            totalHCs,
+            totalProg,
+          };
 
         resolve({
           headers,
           allRows: uniqueRows,
-          dayData: []
+          dayData: [],
+          stats,
         });
 
       } catch (error) {
@@ -241,6 +306,9 @@ export const exportToXLSX = (data: ProductRow[], filename: string) => {
     TURNO: row.TURNO || '',
     CÓDIGO: row.CÓDIGO || row['CODIGO'] || '',
     PRODUTO: row.PRODUTO || '',
+    OP: (row as any).OP || '',
+    HCs: (row as any).HCs ?? '',
+    PROG_DIA: (row as any).PROG_DIA ?? '',
     RATE: row.RATE || ''
   }));
 
@@ -256,6 +324,9 @@ export const exportToCSV = (data: ProductRow[], filename: string) => {
     TURNO: row.TURNO || '',
     CÓDIGO: row.CÓDIGO || row['CODIGO'] || '',
     PRODUTO: row.PRODUTO || '',
+    OP: (row as any).OP || '',
+    HCs: (row as any).HCs ?? '',
+    PROG_DIA: (row as any).PROG_DIA ?? '',
     RATE: row.RATE || ''
   }));
 

@@ -47,6 +47,19 @@ export const ProductTable = ({ products }: ProductTableProps) => {
     );
   }
 
+  const fmt = (n?: number) => {
+    if (n === undefined || n === null) return '';
+    return Number(n).toLocaleString('pt-BR');
+  };
+
+  // Group products by LINHA preserving the original order
+  const groups = new Map<string, ProductRow[]>();
+  for (const p of products) {
+    const key = p.LINHA || '—';
+    if (!groups.has(key)) groups.set(key, []);
+    groups.get(key)!.push(p);
+  }
+
   return (
     <div className="rounded-lg border border-border overflow-hidden">
       <Table>
@@ -56,25 +69,51 @@ export const ProductTable = ({ products }: ProductTableProps) => {
             <TableHead className="font-semibold text-foreground">TURNO</TableHead>
             <TableHead className="font-semibold text-foreground">CÓDIGO</TableHead>
             <TableHead className="font-semibold text-foreground">PRODUTO</TableHead>
+            <TableHead className="font-semibold text-foreground">OP</TableHead>
+            <TableHead className="font-semibold text-foreground">HCs</TableHead>
+            <TableHead className="font-semibold text-foreground">PROG. DIA</TableHead>
             <TableHead className="font-semibold text-foreground">RATE</TableHead>
           </TableRow>
         </TableHeader>
         <TableBody>
-          {products.map((product, index) => {
-            const linha = product.LINHA || '';
+          {[...groups.entries()].map(([linha, rows]) => {
             const colorClass = colorClassForLine(linha);
-            
+            const totalProg = rows.reduce((acc, r) => acc + (Number(r.PROG_DIA) || 0), 0);
+            const hcsLine = rows.reduce((acc, r) => {
+              const val = Number(r.HCs ?? 0);
+              return val > acc ? val : acc; // take max (usually same across rows)
+            }, 0);
+
             return (
-              <TableRow 
-                key={index} 
-                className={`${colorClass} hover:bg-[hsl(var(--table-row-hover))]`}
-              >
-                <TableCell className="font-medium">{product.LINHA}</TableCell>
-                <TableCell>{product.TURNO}</TableCell>
-                <TableCell className="font-mono text-sm">{product.CÓDIGO || product['CODIGO']}</TableCell>
-                <TableCell>{product.PRODUTO}</TableCell>
-                <TableCell>{product.RATE}</TableCell>
-              </TableRow>
+              <>
+                <TableRow key={`group-${linha}`} className={`${colorClass} hover:bg-[hsl(var(--table-row-hover))]`}> 
+                  <TableCell colSpan={8} className="font-semibold">
+                    <div className="flex items-center justify-between">
+                      <div>
+                        LINHA {linha}
+                        <span className="ml-3 text-xs text-muted-foreground">{rows.length} SKU(s)</span>
+                      </div>
+                      <div className="flex gap-6 text-sm">
+                        <span>HCs: <strong>{fmt(hcsLine)}</strong></span>
+                        <span>Prog. do dia: <strong>{fmt(totalProg)}</strong></span>
+                      </div>
+                    </div>
+                  </TableCell>
+                </TableRow>
+                {rows.map((product, index) => (
+                  <TableRow key={`row-${linha}-${index}`} className={`hover:bg-[hsl(var(--table-row-hover))]`}>
+                    {/* Não repetir a LINHA nas linhas do grupo */}
+                    <TableCell className="font-medium">{/* vazio de propósito */}</TableCell>
+                    <TableCell>{product.TURNO}</TableCell>
+                    <TableCell className="font-mono text-sm">{product.CÓDIGO || (product as any)['CODIGO']}</TableCell>
+                    <TableCell>{product.PRODUTO}</TableCell>
+                    <TableCell>{(product as any).OP || ''}</TableCell>
+                    <TableCell>{fmt((product as any).HCs as number)}</TableCell>
+                    <TableCell>{fmt((product as any).PROG_DIA as number)}</TableCell>
+                    <TableCell>{product.RATE}</TableCell>
+                  </TableRow>
+                ))}
+              </>
             );
           })}
         </TableBody>

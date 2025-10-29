@@ -4,6 +4,10 @@ export interface ProductRow {
   CÓDIGO: string;
   PRODUTO: string;
   RATE?: string;
+  // Campos normalizados adicionados pelo parser (quando disponíveis)
+  OP?: string;       // Ordem de Produção da linha/produto
+  HCs?: number;      // Quantidade de HCs para a linha/produto
+  PROG_DIA?: number; // Programação total para o produto no dia selecionado
   [key: string]: any;
 }
 
@@ -18,6 +22,7 @@ export interface ParsedData {
   headers: string[];
   allRows: ProductRow[];
   dayData: DayData[];
+  stats?: PlanStats;
 }
 
 export interface ShiftSelection {
@@ -29,4 +34,10 @@ export interface DayColumns {
   dayIndex: number;
   columns: string[];
   date?: string;
+}
+
+export interface PlanStats {
+  opList: string[]; // Distinct OPs present among active items
+  totalHCs: number; // Sum of HC/HCs column across active items
+  totalProg: number; // Sum of PROG for the target day only
 }

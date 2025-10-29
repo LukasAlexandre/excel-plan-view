@@ -1,14 +1,15 @@
 import { Download } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { ProductTable } from './ProductTable';
-import { DayData } from '@/types/excel';
+import { DayData, PlanStats } from '@/types/excel';
 import { exportToXLSX, exportToCSV } from '@/utils/excelParser';
 
 interface DayPlanViewProps {
   dayData: DayData;
+  stats?: PlanStats;
 }
 
-export const DayPlanView = ({ dayData }: DayPlanViewProps) => {
+export const DayPlanView = ({ dayData, stats }: DayPlanViewProps) => {
   const handleExportXLSX = () => {
     exportToXLSX(dayData.products, `plano_${dayData.dayName.toLowerCase()}.xlsx`);
   };
@@ -25,9 +26,26 @@ export const DayPlanView = ({ dayData }: DayPlanViewProps) => {
           <p className="text-muted-foreground mt-1">
             {dayData.dayName}
           </p>
-          <p className="text-lg font-semibold text-primary mt-2">
-            {dayData.products.length} produtos ativos
-          </p>
+          <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-2 mt-3 text-sm">
+            <div className="text-foreground/90">
+              <span className="font-semibold">Produtos ativos:</span> {dayData.products.length}
+            </div>
+            {stats?.opList && stats.opList.length > 0 && (
+              <div className="text-foreground/90">
+                <span className="font-semibold">OP{stats.opList.length > 1 ? 's' : ''}:</span> {stats.opList.join(', ')}
+              </div>
+            )}
+            {typeof stats?.totalHCs === 'number' && (
+              <div className="text-foreground/90">
+                <span className="font-semibold">HCs:</span> {stats.totalHCs}
+              </div>
+            )}
+            {typeof stats?.totalProg === 'number' && (
+              <div className="text-foreground/90">
+                <span className="font-semibold">Prog. total do dia:</span> {stats.totalProg}
+              </div>
+            )}
+          </div>
         </div>
         <div className="flex gap-2">
           <Button onClick={handleExportXLSX} variant="outline" size="sm">

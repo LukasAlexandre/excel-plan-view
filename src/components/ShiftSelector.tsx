@@ -5,12 +5,20 @@ import { Clock } from 'lucide-react';
 interface ShiftSelectorProps {
   onSelectShift: (shift: '1' | '2') => void;
   selectedFile: string;
+  onBack?: () => void;
 }
 
-export const ShiftSelector = ({ onSelectShift, selectedFile }: ShiftSelectorProps) => {
+export const ShiftSelector = ({ onSelectShift, selectedFile, onBack }: ShiftSelectorProps) => {
   return (
     <div className="min-h-screen bg-background p-8">
       <div className="max-w-4xl mx-auto">
+        <div className="mb-4">
+          {onBack && (
+            <Button variant="ghost" onClick={onBack}>
+              ← Voltar
+            </Button>
+          )}
+        </div>
         <div className="text-center mb-12">
           <h1 className="text-4xl font-bold text-foreground mb-4">
             Selecione o Turno
