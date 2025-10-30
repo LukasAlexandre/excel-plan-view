@@ -2,6 +2,7 @@ import { useEffect } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
+import { Badge } from '@/components/ui/badge';
 import { Calendar, CalendarRange, CalendarDays } from 'lucide-react';
 import { usePlan } from '@/context/PlanContext';
 
@@ -35,25 +36,41 @@ const PlanTypeSelect = () => {
             </CardContent>
           </Card>
 
-          <Card className="cursor-pointer hover:shadow-lg transition-all hover:border-primary/50 bg-card" onClick={() => navigate('/plano-da-semana')}>
+          <Card
+            className="transition-all bg-card opacity-70 cursor-not-allowed relative"
+            aria-disabled
+          >
             <CardHeader>
               <CalendarRange className="w-12 h-12 text-primary mb-4" />
               <CardTitle className="text-2xl">Plano da Semana</CardTitle>
-              <CardDescription>Visão consolidada por dia da semana</CardDescription>
+              <div className="flex items-center gap-2">
+                <CardDescription>Visão consolidada por dia da semana</CardDescription>
+                <Badge variant="secondary">EM DESENVOLVIMENTO</Badge>
+              </div>
             </CardHeader>
             <CardContent>
-              <Button className="w-full" size="lg">Abrir Plano da Semana</Button>
+              <Button className="w-full" size="lg" disabled>
+                Abrir Plano da Semana
+              </Button>
             </CardContent>
           </Card>
 
-          <Card className="cursor-pointer hover:shadow-lg transition-all hover:border-primary/50 bg-card" onClick={() => navigate('/plano-do-mes')}>
+          <Card
+            className="transition-all bg-card opacity-70 cursor-not-allowed relative"
+            aria-disabled
+          >
             <CardHeader>
               <CalendarDays className="w-12 h-12 text-primary mb-4" />
               <CardTitle className="text-2xl">Plano Mensal</CardTitle>
-              <CardDescription>Resumo mensal por linha e SKU</CardDescription>
+              <div className="flex items-center gap-2">
+                <CardDescription>Resumo mensal por linha e SKU</CardDescription>
+                <Badge variant="secondary">EM DESENVOLVIMENTO</Badge>
+              </div>
             </CardHeader>
             <CardContent>
-              <Button className="w-full" size="lg">Abrir Plano Mensal</Button>
+              <Button className="w-full" size="lg" disabled>
+                Abrir Plano Mensal
+              </Button>
             </CardContent>
           </Card>
         </div>
