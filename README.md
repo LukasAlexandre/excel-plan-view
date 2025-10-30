@@ -66,6 +66,40 @@ Simply open [Lovable](https://lovable.dev/projects/6b1d532f-94e1-4a89-8314-c3359
 
 ## Can I connect a custom domain to my Lovable project?
 
+## Deploy na Vercel
+
+Este projeto já está preparado para deploy na Vercel como SPA (React Router) usando Vite.
+
+O arquivo `vercel.json` contém:
+
+- `buildCommand`: `npm run build`
+- `outputDirectory`: `dist`
+- `framework`: `vite`
+- `rewrites`: regra que direciona qualquer rota sem extensão para `index.html`, garantindo que o React Router funcione no refresh/links diretos.
+
+### Via GitHub (recomendado)
+1. Crie um repositório e faça push do código.
+2. No painel da Vercel, clique em “Add New…” > “Project” e importe o repositório.
+3. Confirme as configurações sugeridas. A Vercel detectará o `vercel.json` e fará o build automático.
+4. Após o build, a prévia (Preview) e a URL de produção estarão disponíveis.
+
+### Via Vercel CLI (Windows PowerShell)
+1. Instale a CLI (opcional, apenas se quiser deploy manual):
+	```powershell
+	npm i -g vercel
+	```
+2. Dentro da pasta do projeto, autentique-se e faça o primeiro deploy:
+	```powershell
+	vercel
+	```
+	- Na primeira vez, a CLI vai perguntar o diretório de saída; responda `dist`.
+3. Para promover para produção:
+	```powershell
+	vercel --prod
+	```
+
+Se for necessário definir variáveis de ambiente, configure-as em Project Settings > Environment Variables e rode um novo build/deploy.
+
 Yes, you can!
 
 To connect a domain, navigate to Project > Settings > Domains and click Connect Domain.

@@ -36,8 +36,8 @@ const DayPlan = () => {
     <div className="min-h-screen bg-background p-8">
       <div className="max-w-7xl mx-auto space-y-4">
         <div className="flex items-center justify-between">
-          <Button variant="ghost" onClick={() => navigate('/turnos')}>
-            ← Voltar para Turnos
+          <Button variant="ghost" onClick={() => navigate('/planos')}>
+            ← Voltar
           </Button>
           <Button variant="ghost" onClick={() => { resetAll(); navigate('/'); }}>
             <UploadIcon className="w-4 h-4 mr-2" />

@@ -2,7 +2,7 @@ import { Download } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { ProductTable } from './ProductTable';
 import { DayData, PlanStats } from '@/types/excel';
-import { exportToXLSX, exportToCSV } from '@/utils/excelParser';
+import { exportToXLSX, exportToCSV, exportToPlanJSON } from '@/utils/excelParser';
 
 interface DayPlanViewProps {
   dayData: DayData;
@@ -16,6 +16,16 @@ export const DayPlanView = ({ dayData, stats }: DayPlanViewProps) => {
 
   const handleExportCSV = () => {
     exportToCSV(dayData.products, `plano_${dayData.dayName.toLowerCase()}.csv`);
+  };
+
+  const handleExportJSON = () => {
+    // Name file using ISO date if possible
+    const today = new Date();
+    const yyyy = today.getFullYear();
+    const mm = String(today.getMonth() + 1).padStart(2, '0');
+    const dd = String(today.getDate()).padStart(2, '0');
+    const iso = `${yyyy}-${mm}-${dd}`;
+    exportToPlanJSON(dayData.products, `plano_${iso}.json`, { reportDate: iso });
   };
 
   return (
@@ -55,6 +65,10 @@ export const DayPlanView = ({ dayData, stats }: DayPlanViewProps) => {
           <Button onClick={handleExportCSV} variant="outline" size="sm">
             <Download className="w-4 h-4 mr-2" />
             Baixar CSV
+          </Button>
+          <Button onClick={handleExportJSON} variant="default" size="sm">
+            <Download className="w-4 h-4 mr-2" />
+            Exportar JSON
           </Button>
         </div>
       </div>

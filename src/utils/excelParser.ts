@@ -339,3 +339,60 @@ export const exportToCSV = (data: ProductRow[], filename: string) => {
   link.download = filename;
   link.click();
 };
+
+// Export in the JSON format accepted by the other system
+// Schema:
+// {
+//   "reportDate": "yyyy-MM-dd" (optional),
+//   "entries": [ { "linha": string, "sku": string, "turno": number, "hcs": number } ]
+// }
+export const exportToPlanJSON = (
+  data: ProductRow[],
+  filename: string,
+  opts?: { reportDate?: Date | string }
+) => {
+  // Helper to format date as yyyy-MM-dd
+  const toIsoDate = (d: Date | string | undefined): string | undefined => {
+    if (!d) return undefined;
+    if (typeof d === 'string') {
+      // If it's already yyyy-MM-dd, keep it; otherwise try to parse DD/MM/YYYY
+      if (/^\d{4}-\d{2}-\d{2}$/.test(d)) return d;
+      const m = d.match(/^(\d{2})\/(\d{2})\/(\d{4})$/);
+      if (m) {
+        const [, dd, mm, yyyy] = m;
+        return `${yyyy}-${mm}-${dd}`;
+      }
+      // Fallback: return as-is
+      return d;
+    }
+    const yyyy = d.getFullYear();
+    const mm = String(d.getMonth() + 1).padStart(2, '0');
+    const dd = String(d.getDate()).padStart(2, '0');
+    return `${yyyy}-${mm}-${dd}`;
+  };
+
+  const payload = {
+    reportDate: toIsoDate(opts?.reportDate ?? new Date()),
+    entries: data
+      .filter((row) => Boolean(row.LINHA) && Boolean(row.CÓDIGO || (row as any)['CODIGO']))
+      .map((row) => {
+        const turnoRaw = String(row.TURNO ?? '').trim();
+        const turnoNum = Number.parseInt(turnoRaw, 10);
+        const hcRaw = (row as any).HCs ?? (row as any)['HC'] ?? (row as any)['HCS'];
+        const hcs = typeof hcRaw === 'number' ? hcRaw : Number(String(hcRaw).replace(/[^\d]/g, '')) || 0;
+
+        return {
+          linha: String(row.LINHA ?? '').trim(),
+          sku: String(row.CÓDIGO ?? (row as any)['CODIGO'] ?? '').trim(),
+          turno: Number.isFinite(turnoNum) ? turnoNum : 0,
+          hcs,
+        };
+      }),
+  } as const;
+
+  const blob = new Blob([JSON.stringify(payload, null, 2)], { type: 'application/json;charset=utf-8;' });
+  const link = document.createElement('a');
+  link.href = URL.createObjectURL(blob);
+  link.download = filename;
+  link.click();
+};

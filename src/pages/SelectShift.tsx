@@ -23,8 +23,8 @@ const SelectShift = () => {
       const today = new Date();
       const data = await parseExcelFile(uploadedFile, today, shift);
       setParsedData(data);
-      toast.success(`Plano carregado - ${shift}° Turno`);
-      navigate('/plano-do-dia');
+  toast.success(`Plano carregado - ${shift}° Turno`);
+  navigate('/planos');
     } catch (error) {
       console.error('Error parsing file:', error);
       toast.error('Erro ao processar arquivo. Verifique o formato da planilha.');
