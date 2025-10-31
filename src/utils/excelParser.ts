@@ -42,8 +42,8 @@ export const parseExcelFile = async (file: File, targetDate?: Date, shift?: stri
         // Get date row (one row above header)
         const dateRow = headerRowIndex > 0 ? jsonData[headerRowIndex - 1] : [];
         
-        // Find columns that match the target date
-        const targetDateColumns: number[] = [];
+  // Find columns that match the target date (map them to the PROG column of that date group)
+  const targetDateColumns: number[] = [];
         if (targetDate) {
           console.log('🔍 Target Date:', targetDate);
           console.log('📅 Date Row:', dateRow);
@@ -98,8 +98,24 @@ export const parseExcelFile = async (file: File, targetDate?: Date, shift?: stri
                   cellDate.getDate() === targetDate.getDate() &&
                   cellDate.getMonth() === targetDate.getMonth()
                 ) {
-                  console.log(`✅ Found matching date column at index ${index}: ${headers[index]}`);
-                  targetDateColumns.push(index);
+                  // Robustly find the "PROG" column within the next few columns of this date group.
+                  // Many sheets merge the date cell across PROG/REAL/SET-UP/RAMP.
+                  const SEARCH_WINDOW = 6; // be generous
+                  let progIdx: number | null = null;
+                  for (let off = 0; off < SEARCH_WINDOW; off++) {
+                    const j = index + off;
+                    const h = headers[j];
+                    if (!h) continue;
+                    if (String(h).toUpperCase().trim() === 'PROG') {
+                      progIdx = j;
+                      break;
+                    }
+                  }
+                  const chosenIndex = progIdx ?? index;
+                  if (!targetDateColumns.includes(chosenIndex)) {
+                    console.log(`✅ Found date group at index ${index}; using PROG column index ${chosenIndex}`);
+                    targetDateColumns.push(chosenIndex);
+                  }
                 }
               }
             }
@@ -204,15 +220,17 @@ export const parseExcelFile = async (file: File, targetDate?: Date, shift?: stri
 
         // ===== Aggregate stats: OP list, total HCs, and total program for the target day =====
           // ===== Helpers for aggregates =====
-          // Integer parser for counts like PROG and HCs (strip all non-digits)
-          const toInt = (val: any): number => {
+          // Safer integer parser: capture only the FIRST numeric token (avoids concatenating multiple numbers).
+          const toInt = (val: unknown): number => {
             if (val === undefined || val === null) return 0;
             if (typeof val === 'number') return Math.round(val);
-            const digits = String(val).match(/\d+/g);
-            if (!digits) return 0;
-            const joined = digits.join('');
-            const n = Number(joined);
-            return isNaN(n) ? 0 : n;
+            const s = String(val).trim();
+            // Match first number like "1.234" or "1234"
+            const m = s.match(/\d{1,3}(?:[\.\s]\d{3})+|\d+/);
+            if (!m) return 0;
+            const digitsOnly = m[0].replace(/[^\d]/g, '');
+            const n = Number(digitsOnly);
+            return Number.isFinite(n) ? n : 0;
           };
 
           // Try to detect OP and HC columns by header names
@@ -340,57 +358,146 @@ export const exportToCSV = (data: ProductRow[], filename: string) => {
   link.click();
 };
 
-// Export in the JSON format accepted by the other system
-// Schema:
+// JSON do plano (ajustado):
+// - Sem linhas duplicadas
+// - Agrupa múltiplos SKUs por linha e turno (até 5 por linha)
+// Novo schema:
 // {
-//   "reportDate": "yyyy-MM-dd" (optional),
-//   "entries": [ { "linha": string, "sku": string, "turno": number, "hcs": number } ]
+//   "reportDate": "yyyy-MM-dd" (opcional),
+//   "entries": [ { "linha": string, "turno": number, "hcs": number, "skus": string[] } ]
 // }
+
+// Helper para formatar data como yyyy-MM-dd
+const toIsoDate = (d: Date | string | undefined): string | undefined => {
+  if (!d) return undefined;
+  if (typeof d === 'string') {
+    // Se já for yyyy-MM-dd mantem; senão tenta DD/MM/YYYY
+    if (/^\d{4}-\d{2}-\d{2}$/.test(d)) return d;
+    const m = d.match(/^(\d{2})\/(\d{2})\/(\d{4})$/);
+    if (m) {
+      const [, dd, mm, yyyy] = m;
+      return `${yyyy}-${mm}-${dd}`;
+    }
+    return d;
+  }
+  const yyyy = d.getFullYear();
+  const mm = String(d.getMonth() + 1).padStart(2, '0');
+  const dd = String(d.getDate()).padStart(2, '0');
+  return `${yyyy}-${mm}-${dd}`;
+};
+
+// Novo formato solicitado: linha, turno, codigo (múltiplos SKUs), hcs, programado no dia, rate
+export type PlanJsonEntry = {
+  linha: string;
+  turno: number;
+  codigo: string[];         // lista de SKUs
+  hcs: number;              // agregado (máximo) por linha/turno
+  programado_dia: number[]; // por SKU (alinhado ao índice de `codigo`)
+  rate: string[];           // por SKU (alinhado ao índice de `codigo`)
+};
+export type PlanJsonPayload = { reportDate?: string; entries: PlanJsonEntry[] };
+
+export const buildPlanJSONPayload = (
+  data: ProductRow[],
+  opts?: { reportDate?: Date | string; maxSkusPerLinha?: number }
+): PlanJsonPayload => {
+  const maxPerLinha = opts?.maxSkusPerLinha ?? 5; // "para um, coloque mais 4 skus" => total 5
+
+  // Agrupa por (LINHA, TURNO)
+  const map = new Map<string, PlanJsonEntry>();
+  const normInt = (v: any): number => {
+    if (v === undefined || v === null) return 0;
+    if (typeof v === 'number') return Math.round(v);
+    const n = Number(String(v).replace(/[^\d]/g, ''));
+    return Number.isFinite(n) ? n : 0;
+  };
+
+  data
+    .filter((row) => Boolean(row.LINHA) && Boolean(row.CÓDIGO || (row as any)['CODIGO']))
+    .forEach((row) => {
+      const linha = String(row.LINHA ?? '').trim();
+      const turnoNum = normInt(row.TURNO);
+      const hcRaw = (row as any).HCs ?? (row as any)['HC'] ?? (row as any)['HCS'];
+      const hcs = normInt(hcRaw);
+      const sku = String(row.CÓDIGO ?? (row as any)['CODIGO'] ?? '').trim();
+      const progDia = normInt((row as any).PROG_DIA);
+      const rate = String(row.RATE ?? '').trim();
+
+      const key = `${linha}|${turnoNum}`;
+      const existing = map.get(key);
+      if (!existing) {
+        map.set(key, {
+          linha,
+          turno: turnoNum,
+          codigo: sku ? [sku] : [],
+          hcs,
+          programado_dia: sku ? [progDia] : [],
+          rate: sku ? [rate] : [],
+        });
+      } else {
+        // Mantém o maior HCs entre itens agrupados
+        if (hcs > existing.hcs) existing.hcs = hcs;
+        if (sku) {
+          const idx = existing.codigo.indexOf(sku);
+          if (idx === -1) {
+            if (existing.codigo.length < maxPerLinha) {
+              existing.codigo.push(sku);
+              existing.programado_dia.push(progDia);
+              existing.rate.push(rate);
+            }
+          } else {
+            // Mesma SKU repetida: acumula programado e mantém primeiro rate não vazio
+            existing.programado_dia[idx] += progDia;
+            if (!existing.rate[idx] && rate) existing.rate[idx] = rate;
+          }
+        }
+      }
+    });
+
+  const entries = Array.from(map.values());
+  return {
+    reportDate: toIsoDate(opts?.reportDate ?? new Date()),
+    entries,
+  };
+};
+
+export const stringifyPlanJSON = (
+  data: ProductRow[],
+  opts?: { reportDate?: Date | string; maxSkusPerLinha?: number; pretty?: boolean }
+): string => {
+  const payload = buildPlanJSONPayload(data, opts);
+  return JSON.stringify(payload, null, opts?.pretty === false ? undefined : 2);
+};
+
+export const copyPlanJSONToClipboard = async (
+  data: ProductRow[],
+  opts?: { reportDate?: Date | string; maxSkusPerLinha?: number; pretty?: boolean }
+) => {
+  const json = stringifyPlanJSON(data, { ...opts, pretty: true });
+  if (navigator?.clipboard?.writeText) {
+    await navigator.clipboard.writeText(json);
+    return true;
+  }
+  // Fallback
+  const ta = document.createElement('textarea');
+  ta.value = json;
+  ta.style.position = 'fixed';
+  ta.style.left = '-9999px';
+  document.body.appendChild(ta);
+  ta.focus();
+  ta.select();
+  const ok = document.execCommand('copy');
+  document.body.removeChild(ta);
+  return ok;
+};
+
 export const exportToPlanJSON = (
   data: ProductRow[],
   filename: string,
-  opts?: { reportDate?: Date | string }
+  opts?: { reportDate?: Date | string; maxSkusPerLinha?: number; pretty?: boolean }
 ) => {
-  // Helper to format date as yyyy-MM-dd
-  const toIsoDate = (d: Date | string | undefined): string | undefined => {
-    if (!d) return undefined;
-    if (typeof d === 'string') {
-      // If it's already yyyy-MM-dd, keep it; otherwise try to parse DD/MM/YYYY
-      if (/^\d{4}-\d{2}-\d{2}$/.test(d)) return d;
-      const m = d.match(/^(\d{2})\/(\d{2})\/(\d{4})$/);
-      if (m) {
-        const [, dd, mm, yyyy] = m;
-        return `${yyyy}-${mm}-${dd}`;
-      }
-      // Fallback: return as-is
-      return d;
-    }
-    const yyyy = d.getFullYear();
-    const mm = String(d.getMonth() + 1).padStart(2, '0');
-    const dd = String(d.getDate()).padStart(2, '0');
-    return `${yyyy}-${mm}-${dd}`;
-  };
-
-  const payload = {
-    reportDate: toIsoDate(opts?.reportDate ?? new Date()),
-    entries: data
-      .filter((row) => Boolean(row.LINHA) && Boolean(row.CÓDIGO || (row as any)['CODIGO']))
-      .map((row) => {
-        const turnoRaw = String(row.TURNO ?? '').trim();
-        const turnoNum = Number.parseInt(turnoRaw, 10);
-        const hcRaw = (row as any).HCs ?? (row as any)['HC'] ?? (row as any)['HCS'];
-        const hcs = typeof hcRaw === 'number' ? hcRaw : Number(String(hcRaw).replace(/[^\d]/g, '')) || 0;
-
-        return {
-          linha: String(row.LINHA ?? '').trim(),
-          sku: String(row.CÓDIGO ?? (row as any)['CODIGO'] ?? '').trim(),
-          turno: Number.isFinite(turnoNum) ? turnoNum : 0,
-          hcs,
-        };
-      }),
-  } as const;
-
-  const blob = new Blob([JSON.stringify(payload, null, 2)], { type: 'application/json;charset=utf-8;' });
+  const json = stringifyPlanJSON(data, { ...opts, pretty: true });
+  const blob = new Blob([json], { type: 'application/json;charset=utf-8;' });
   const link = document.createElement('a');
   link.href = URL.createObjectURL(blob);
   link.download = filename;

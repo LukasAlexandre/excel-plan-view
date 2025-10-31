@@ -1,8 +1,9 @@
-import { Download } from 'lucide-react';
+import { Download, Copy as CopyIcon } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { ProductTable } from './ProductTable';
 import { DayData, PlanStats } from '@/types/excel';
-import { exportToXLSX, exportToCSV, exportToPlanJSON } from '@/utils/excelParser';
+import { exportToXLSX, exportToCSV, exportToPlanJSON, copyPlanJSONToClipboard } from '@/utils/excelParser';
+import { toast } from '@/components/ui/use-toast';
 
 interface DayPlanViewProps {
   dayData: DayData;
@@ -26,6 +27,20 @@ export const DayPlanView = ({ dayData, stats }: DayPlanViewProps) => {
     const dd = String(today.getDate()).padStart(2, '0');
     const iso = `${yyyy}-${mm}-${dd}`;
     exportToPlanJSON(dayData.products, `plano_${iso}.json`, { reportDate: iso });
+  };
+
+  const handleCopyJSON = async () => {
+    const today = new Date();
+    const yyyy = today.getFullYear();
+    const mm = String(today.getMonth() + 1).padStart(2, '0');
+    const dd = String(today.getDate()).padStart(2, '0');
+    const iso = `${yyyy}-${mm}-${dd}`;
+    const ok = await copyPlanJSONToClipboard(dayData.products, { reportDate: iso });
+    if (ok) {
+      toast({ title: 'JSON copiado', description: 'Conteúdo do plano copiado para a área de transferência.' });
+    } else {
+      toast({ title: 'Falha ao copiar', description: 'Não foi possível copiar o JSON. Tente exportar o arquivo.', variant: 'destructive' });
+    }
   };
 
   return (
@@ -69,6 +84,10 @@ export const DayPlanView = ({ dayData, stats }: DayPlanViewProps) => {
           <Button onClick={handleExportJSON} variant="default" size="sm">
             <Download className="w-4 h-4 mr-2" />
             Exportar JSON
+          </Button>
+          <Button onClick={handleCopyJSON} variant="secondary" size="sm">
+            <CopyIcon className="w-4 h-4 mr-2" />
+            Copiar JSON
           </Button>
         </div>
       </div>
